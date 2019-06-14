@@ -89,3 +89,36 @@ you can set up an **AWS Cloud9** workspace.
 
 1. Go into your AWS Management Console, and navigate to the 
    [Cloud9 service](https://console.aws.amazon.com/cloud9).
+2. Create a new environment and give it a name and description.
+   (`nickname-workshop-c9` for name works great.)
+3. Specify these settings:
+   1. **Create a new instance for environment (EC2)**
+   2. **Instance Type**: `t2.micro`
+   3. **Platform**: `Amazon Linux`
+   4. Under **Network settings (advanced)**:
+      1. Select the VPC you'll use for the workshop.
+      2. Specify **No preference** for subnet.
+   5. Click **Next Step**, and after confirming the details, 
+      click **Create environment**.
+
+Your Cloud9 environment will take a few minutes to provision.
+
+Once it's ready, it will function as an IDE for this workshop.
+
+* The left hand section shows your files. 
+  Your `<< Cloud9 name >>` root directory is equivalent to your 
+  `~/environment` directory. Anything you create in this directory is 
+  available in your IDE.
+* You can drag files from your machine and drop it on the directory tree
+  to upload it into your Cloud9 file system.
+* You can open files for editing by double clicking on it.
+* You can open a Terminal as a tab by clicking the `(+)` arrow.
+
+Confirm you have the necessary CLI tools by opening a Terminal,
+and entering the following commands in succession:
+
+* `node --version`
+* `nvm --version`
+* `git --version`
+* `docker --version`
+  
