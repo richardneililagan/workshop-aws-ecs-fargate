@@ -252,6 +252,65 @@ not anymore bound to port `:80`, but a seemingly random one.
 
 ![ECS task dynamic port mapping](__assets/ecs_task_dynamic_port.png)
 
+Try visiting one of your task's external URLs and --- **woops**, something's wrong.
+We can't access the task's external URLs directly.
+
+Let's fix that.
+
+
+### 5. Update the ECS cluster's security group
+
+When we created our ECS cluster earlier, we also created a 
+[security group](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-network-security.html)
+that is applied to all the EC2 instances belonging to the cluster.
+
+A security group is a whitelist of allowed network traffic in and out of
+the resource it is attached to. Right now, the security group assigned to your
+ECS cluster's hosts allow HTTP traffic from anywhere to come into the server.
+
+This means that only network traffic going through port `80` is allowed in. 
+If we're expecting to communicate with the container through an IP address
+such as `50.0.0.0:32768`, we'll also need to allow traffic through port `32768`,
+etc.
+
+#### High-level instructions
+
+Modify the security group assigned to your ECS cluster's EC2 instances
+to allow all TCP traffic from anywhere.
+
+> **IMPORTANT:**
+> 
+> Allowing incoming network traffic to all ports from anywhere is an extremely
+> dangerous thing to do. We're only doing it in this workshop to simplify things
+> a bit, but please don't do this in real life unless you're really, really
+> sure you want to.
+
+<details>
+  <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
+  <p>
+  
+  1. Go to your cluster dashboard, and navigate to the **ECS Instances** tab.
+     The EC2 instances that belong to your ECS cluster should be listed.
+  2. Click one of the **EC2 Instance IDs** to go to your EC2 dashboard.
+  3. The EC2 instance that you clicked should already be selected.
+     Towards the bottom of the **Description** tab should be the security
+     group that this EC2 instance belongs to. Click the security group ID.
+  4. Navigate to the **Inbound** tab at the bottom, and click on **Edit**.
+  5. Delete all the rules that are currently in the security group.
+     Add the following rule instead:
+     - **Type**: All TCP
+     - **Source**: Anywhere
+     - Click **Save**.
+  </p>
+</details>
+
+Since all the EC2 instances in your ECS cluster share the same security group,
+adjusting the security group of one affects all the others (and all other EC2
+instances that are added to the cluster via scaling).
+
+Once you've changed the security group rules, confirm that you can now navigate
+to one of your task's external URL directly.
+
 ---
 
 ## Summary
