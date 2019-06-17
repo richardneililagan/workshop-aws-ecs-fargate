@@ -1,318 +1,263 @@
-Module 02: Deploying an Amazon ECS cluster
+Module 03: Managing Tasks and Services in your Cluster
 ===
 
-In this module, we'll create an [Amazon ECS](https://aws.amazon.com/ecs)
-cluster, and use it to run the docker image we created in the last module.
+In a practical scenario, you'll have to make changes to how your application is
+running. This can mean having to scale the number of tasks in your cluster,
+or updating your service with new configuration. Or even updating the Docker
+image used by your app.
 
-## Architecture Overview
-
-Docker containers need to run on a host machine (just like how a virtual machine
-needs to run in a real host machine). An Amazon ECS cluster is a collection
-of [Amazon EC2](https://aws.amazon.com/ec2) instances that are meant to run
-your docker containers.
-
-Amazon ECS is a form of **orchestrator**. 
-A simple way of thinking about it is, you can tell Amazon ECS how many containers
-you want to run, and it will take care of creating those containers,
-distributing them across all your available hosts, and ensuring that you maintain
-that many containers as best it can. This means that if a container becomes
-unhealthy for some reason, Amazon ECS takes care of replacing it so that your
-application can keep on running.
-
-![Architecture Diagram](__assets/architecture-01.png)
-
-In this module, we'll create an Amazon ECS cluster that has 3 host EC2 instances,
-distributed across 3 different availability zones (AZs).
-
-We'll then use this cluster to run multiple copies of the docker image we
-created in the last module.
+In this module, we'll explore at how you can enact some of those changes
+on your cluster.
 
 ---
 
 ## Implementation Details
 
-### 1. Create an image repository on Amazon ECR
+### 1. Scale the number of tasks in your service.
 
-If docker containers need to run on a host machine, docker images, on the other
-hand, need to be stored in an image repository. A popular image repository
-is the [Docker Hub](https://hub.docker.com) where publicly available images
-(like the `node` base image you used last module) are distributed.
-
-[Amazon ECR](https://aws.amazon.com/ecr) is an image repository that you can
-use to privately, securely, and durably store your docker images for use
-in your own applications and workloads.
+In the previous module, we successfully launched a service in our cluster
+that only ran a single instance of our task. Realistically, very often you'll
+want to run more than just one task instance, or even want to change the number
+as your application runs over time.
 
 #### High-level instructions
 
-Create an Amazon ECR repository for the image you created, and push the `:latest`
-version of it into it.
-
-<details>
-  <summary><strong>Step-by-step instructions (click to expand)</strong></summary>
-  <p>
-  
-  1. Go to the [Amazon ECR](https://console.aws.amazon.com/ecr) service on
-     your console, and create a new repository.
-  2. Give your repository a name unique to the image. The image name you used
-     in the last module (e.g. `my-app/server`) is a good choice.
-  3. Back in the repositories list, click your new repository. 
-     Click the **View push commands** button at the top, and follow the 
-     instructions to push your docker image to the repository you created.
-  </p>
-</details>
-
----
-
-### 2. Create a task definition for your image
-
-In Amazon ECS, containers run in a construct called a **task**. 
-A task contains one or more containers, grouped together and designed to run
-as a single unit.
-
-> **NOTE:** 
-> 
-> If you're familiar with [Kubernetes](https://kubernetes.io), 
-> Amazon ECS tasks are similar to Kubernetes pods.
->
-> You can also [use Kubernetes as an orchestrator on AWS](https://aws.amazon.com/eks).
-
-To run a task, you will need to create a **task definition**.
-This contains all the information needed for Amazon ECS to run your containers
-in the right configuration whenever it needs to.
-
-#### High-level instructions
-
-Create a task definition that launches your docker image in ECS mode.
-The task definition should only run your docker image, and map the host port `8080`
-to the container port `8080`.
+Modify your service to run 3 instances of your task. (`1 -> 3`.)
+Verify that the tasks are running correctly.
 
 <details>
   <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
   <p>
   
-  1. Navigate to the [Amazon ECS](https://console.aws.amazon.com/ecs) service
-     on your console, and select **Task Definitions** on the left navbar.
-  2. Create a new Task Definition. We will configure this Task Definition to run
-     containers autonomously, with a public IPv4 address for each.
-  3. Select the **EC2 launch type** when prompted.
-  4. Provide the following values for configuration options:
-     - **Task Definition Name**: _<< your choice >>_ (`nickname_app_service` is good)
-     - **Task Role**: None
-     - **Task Execution Role**: Create new role
-     - **Task memory**: 512
-     - **Task CPU**: 512
-     > **NOTE:** 
-     > 
-     > Containers can be set to run and be limited by fractional CPU units,
-     > unlike traditional VMs. `1024` CPU units is equivalent to `1 vCPU`. 
-     > Setting a value of `512` CPU units is saying that you're limiting this
-     > task to only half a virtual CPU core.
-  5. Under **Container Definitions**, click **Add container**.
-     Container Definitions list all the containers that will need to run whenever
-     this task is initiated.
-     - **Container name**: _<< your choice >>_ (`nickname_imagename` is good)
-     - **Image**: _the image URI from Amazon ECR_
-       ![Image URI from Amazon ECR](__assets/ecr_image_uri.png)
-     - **Memory Limits**: 256 __soft limit__
-     - **Port mappings**: `80` host port / `8080` container port / `tcp`
+  1. Go back to your cluster's detail page, by clicking on your cluster 
+     from your [Amazon ECS](https://console.aws.amazon.com/ecs) dashboard.
+
+     Confirm that you're running only 1 service and 1 task in your cluster.
+  2. On your cluster's **Services** tab, select your running service, 
+     and click **Update**. 
+  3. On the **Update Service** page, change:
+     - **Number of tasks**: from `1` to `3`.
+     - As we don't plan to change anything else, click **Skip to review**.
+  4. Confirm the details of the update, then click **Update Service** to commit.
+  5. At the confirmation page, click **View Service** to see the changes.
+  </p>
+</details>
+
+Your service will have been modified from maintaining only one instance of your
+task to running 3 of them. 
+
+If you go to your service's **Tasks** tab, you should see 3 instances running
+(eventually) in `RUNNING` status. In your **Events** tab, you should see that 
+your service has reached a steady state as well.
+
+Test the tasks / containers just like how we did it in the previous module.
+
+
+### 2. Scale the number of EC2 instances in our cluster.
+
+In a container-based deployment, you don't only manage the number of tasks /
+containers running, but also the number of hosts. Remember that tasks and containers
+need to reserve resources for them to run --- those resources come from the
+hosts that run the containers themselves. If there are not enough resources,
+we'll have to adjust somehow --- this sometimes means we need to also scale
+the number of hosts in our cluster.
+
+#### High-level instructions
+
+Scale your service again to run `4` copies of your task, and see how it reacts.
+Investigate what goes wrong. 
+
+Afterwards, increase the number of EC2 instances in your ECS cluster.
+Verify that this now lets you launch more tasks.
+
+<details>
+  <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
+  <p>
+  
+  1. Update your service again, specifying that you want to run 4 task instances.
+  2. Back in your service detail page, notice that while the **Desired count** has
+     been updated to `4`, the number of running tasks maintains at `3`. 
+  3. In the service's **Events** tab, review what happened.
+  4. Navigate back to your cluster's detail page, and go to your 
+     **ECS Instances** tab. You should see 3 EC2 instances.
+  5. Click **Scale ECS Instances**, and change the **Desired number
+     of instances** to `4`.
      > **NOTE:**
-     > 
-     > Notice how your container is reserving resources allocated for this task.
-     > Each task is allocated some resources (as defined by your task definition),
-     > and each container running in the task can reserve some of those resources
-     > in turn. The total resource consumption of all containers in a task
-     > cannot exceed the total resources available for the task.
-     > ![ECS resource reservation](__assets/ecs_taskdef_reservation.png)
-     - Click **Add** to complete this container configuration.
-  6. Click **Create**. We will skip the other options for now.
-  </p>
-</details>
-
-When you now go back to your Task Definitions dashboard, you should see your 
-new task with a **Latest Revision Status** set as `ACTIVE`.
-
-If you click through your task, it should only list one revision. 
-
----
-
-### 3. Create an ECS cluster
-
-Now that we have a task definition to run containers, we'll need a cluster
-to actually run our containers in.
-
-#### High-level instructions
-
-Create an ECS cluster with 3 `t3.micro` EC2 hosts, segregated across 
-3 different Availability Zones (AZs).
-
-<details>
-  <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
-  <p>
-  
-  1. Still on your [Amazon ECS dashboard](https://console.aws.amazon.com/ecs), 
-     click the **Clusters** link on the left navbar.
-  2. Click **Create Cluster** at the top. Select **EC2 Linux + Networking**
-     when given the option. This will launch the cluster using EC2 instances
-     you manage and provision yourself.
-  3. Provide the following inputs:
-     - **Cluster name**: _<< your choice >>_ (`nickname_ecs_cluster` is great)
-     - **Provisioning model**: On-Demand Instance
-     - **EC2 instance type**: `t3.micro`
-     - **Number of instances**: 3
-     - **EC2 AMI ID**: Amazon Linux 2 AMI
-  4. Under **Networking**, provide the following inputs:
-     - **VPC**: _select the VPC you prepared for this workshop_. 
-       (If you don't recognize which it is, you may want to go to your
-       [VPC dashboard](https://console.aws.amazon.com/vpc) to review.)
-     - **Subnets**: select all (3) subnets you want to deploy EC2 instances to.
-       You will need to keep clicking the dropdown to select subnets one at a time.
-     - **Security group**: Create a new security group
-     - **Security group inbound rules**: Keep the defaults:
-       - `0.0.0.0/0` CIDR
-       - `80` Port range
-       - `tcp` protocol
-  5. Under **Container instance IAM role**, select `ecsInstanceRole`.
-     If it is not available, opt to `Create a new role`.
-  6. Click **Create** to complete cluster creation.
-  </p>
-</details>
-
-Amazon ECS will take a few moments to create your cluster.
-An [Amazon CloudFormation](https://aws.amazon.com/cloudformation) template will 
-be created and synthesized for you, and this will be used to deploy your
-cluster across your account.
-
-Once the cluster creation is done, you'll have a bunch of information about the
-cluster ready. While not required, you may want to copy out the resource values
-somewhere accessible. 
-
-> **NOTE:** 
-> 
-> You can always find these values in your dashboard --- 
-> it might just be a bit easier if you already have the values on hand.
-
-Confirm that your cluster has the following:
-- 3 `t3.micro` instances, across 3 subnets and 3 AZs
-- a security group
-
-![ECS cluster creation confirmation page](__assets/ecs_cluster_confirmation.png)
-
----
-
-### 4. Run containers on your ECS cluster 🚀
-
-Alright! We've got a docker image, we've got a task defined to run it, 
-we've got a cluster to run our containers, **and** we've got a coffee!
-(Get one if you don't have one, maybe.)
-
-Let's get to actually running stuff.
-
-#### High-level instructions
-
-Run a single instance of the task you created in your ECS cluster.
-Verify that you can reach the container.
-
-<details>
-  <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
-  <p>
-  
-  1. Go to your clusters dashboard, and click through to your cluster detail page.
-     You should see that:
-     - It has an `ACTIVE` status.
-     - It has 3 **registered EC2 container instances**.
-     - Zero services and tasks are running. 
-  2. On the **Services** tab of your cluster, click **Create** to start 
-     initializing a new service.
-     > **IMPORTANT:**
-     >  
-     > An ECS service is a logical collection of tasks (containers) that run
-     > as a unit. If a container dies within a service, the service is responsible
-     > for replacing it to keep the service running.
-     > 
-     > If you're accustomed to building applications 
-     > [in layers](https://en.wikipedia.org/wiki/Multitier_architecture),
-     > you might find it convenient to think of ECS services as a layer in
-     > your application architecture (e.g. the web server layer, or logic layer).
      >
-     > If you're already familiar with [Kubernetes](https://kubernetes.io), 
-     > an ECS service is very similar in concept to a 
-     > [Kubernetes Service](https://kubernetes.io/docs/concepts/services-networking/service/).
-  3. Select the following options:
-     - **Launch type**: EC2 (we'll get to [Fargate](https://aws.amazon.com/fargate) later!)
-     - **Task Definition**: Select the task definition you just created, with the
-       latest revision selected (you should probably only have one at this point).
-     - **Cluster**: Select the ECS cluster you created.
-     - **Service Name**: Give your service a name. (`nickname_app_service` is great)
-     - **Service Type**: Replica
-     - **Number of Task**: 1
-     - **Task Placement**: AZ Balanced Spread
-     - Click **Next Step**
-  4. Under **Configure Network**, input the following configuration values:
-     - **Load Balancing**: None
-     - Click **Next Step**
-  5. Under **Set Auto Scaling**, select **Do not adjust the service's desired count**.
-  6. Confirm your service details, then click **Create Service**.
+     > If you were observant, you'd have noticed that your ECS cluster's 
+     > EC2 instances are actually managed behind an 
+     > [EC2 Autoscaling Group](https://aws.amazon.com/ec2/autoscaling/). 
+     > This ASG should be visible from this modal.
+     > 
+     > When you update your cluster's desired number of instances,
+     > you're actually updating the ASG's parameters to make this change happen.
+     > 
+     > You can also modify this ASG's parameters in other ways ---
+     > for example, you can use scaling policies to automatically 
+     > [change the number of EC2 instances required based on the amount of memory](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/cloudwatch_alarm_autoscaling.html)
+     > your tasks / containers are using.
+  6. It will take a few moments for your new host to come online as the
+     ASG attempts to create a new EC2 instance, start it, and register it against
+     the ECS cluster.
+
+     After a while, your cluster should now show 4 ECS instances.
+     ![ECS cluster detail](__assets/ecs_cluster_manual_scaling.png)
   </p>
 </details>
 
-It should only take a very short while for your service to be created.
-Click **View Service** to go to the service's detail page.
+After a while, your service would have recognized that there is now available 
+resources, and it will have automatically launched the 4th task that it failed
+to launch before.
 
-Your ECS service will attempt to launch a number of tasks equal to the desired 
-number you specified (should be only 1 at this point), using the task definition
-you provided. 
+![ECS service 4 tasks running](__assets/ecs_service_scaling.png)
 
-The service detail page will list all the tasks it's currently running,
-and each will go from `ACTIVATING` to `RUNNING` if you've configured your service
-and tasks correctly. 
 
-![ECS service detail page](__assets/ecs_service.png)
+### 3. Update our task and service
 
-Click the **Task ID** to go to that task's detail page.
+So, because of some investigation we did, we determined that the initial task
+definition we created does **NOT** need 512 MB of memory. There's only one
+container running inside it, and that only needs 256 MB. We're wasting the 
+remaining 256 MB in the task!
 
-On the task detail page, you can review a lot of information about the task,
-including which cluster it's running in, what its status is, and the containers
-it's currently running.
+Let's fix that!
 
-Under the **Containers** section, if you expand the row of the container it's running
-(there should only be one now), you can also see quick details about the container
-itself. Most important right now is that it **should have been given an external
-link**. 
+> **NOTE:**
+>
+> It's not entirely correct to say that the remaining memory is being wasted.
+> Since we configured the container to use a **soft limit** of 256 MB, it can
+> be permitted to use _more_ than 256 MB if ever it needed to.
 
-Open the external link on another browser tab. 
-If everything is working correctly, you should be able to see the message from
-your container (`Hello from {CONTAINER ID}!`).
+#### High-level instructions
 
-![ECS task container detail](__assets/ecs_task.png)
+Modify our task definition to only reserve 256 MB of memory, instead of the
+initial 512 MB. Afterwards, modify the service running this task to use the 
+newer version of the task definition instead.
+
+<details>
+  <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
+  <p>
+  
+  1. Go to your **Task Definitions** dashboard, and click your task definition.
+  2. In your task definition detail page, you will have a list of revisions made
+     made to it (there should only be one). Select the active revision, and
+     click **Create new revision** at the top.
+  3. Let's modify this task to use less memory. Modify the task memory from `512`
+     to `256`. Notice how the single container allocated to this task now reserves
+     100% of the reserved task memory.
+     > **NOTE:**
+     >
+     > For reference, a `t3.micro` instance has **2 vCPUs, and 1 GB memory**.
+     
+     Click **Create** at the bottom to finalize your changes.
+  4. Notice that you'll now have **two** revisions to your task definition.
+     Now, we need to update our service to use the new revision, and not the 
+     old one.
+     > **IMPORTANT:**
+     >
+     > A running service will **not** automatically use new revisions to a 
+     > task definition. This is to better ensure stability of an application.
+     > The service will have to be updated to use the new revisions when
+     > the new revisions have been tested thoroughly to work in a stable manner.
+
+     Navigate back to your cluster's **Services** tab, and note that your service
+     is still using the first revision of your task definition.
+
+     ![ECS service task revision](__assets/ecs_service_taskdef_revision.png)
+  5. Select your service, then click **Update**. under **Task Definition**, 
+     specify that you want your service to use the revision you just created.
+     (This should have been `Revision 2`.)
+
+     Again, just **Skip to review**, and confirm your changes.
+  6. You should be redirected to the service's **Deployment** detail tab.
+     Notice that there are now 2 deployments currently in effect --- one is the
+     old deployment (with 4 tasks running), and the other is a new deployment
+     caused by your recent service configuration change.
+
+     ![ECS service deployments](__assets/ecs_service_deployments.png)
+  7. To allow the service to deploy the new task definitions, we need to 
+     stop the tasks that are currently running to make room.
+
+     > **🔥🔥🔥CHALLENGE:🔥🔥🔥** 
+     > 
+     > Why is that?
+
+     Go to your **cluster**'s detail page, and navigate to the **Tasks** tab
+     at the bottom. Note that all the tasks are still running your first revision.
+
+     Select one of these tasks and stop it by clicking the **Stop** button.
+     Confirm the action by clicking **Stop** in the modal that shows.
+
+     The service will go down to 3 running tasks --- after a while, it will 
+     go back to 4 tasks as the service tries to maintain the number of 
+     running instances. Note that when a new task is started by the service, 
+     it will now be using the new task definition revision.
+  8. Proceed to stop the 3 remaining tasks that are using the old task definition.
+     The service will come back up with 4 running tasks after a short period.
+  9. To confirm that the new tasks are now using less memory, you can confirm
+     the resource usage by going to your cluster's detail page, then 
+     navigating to the **ECS Instances** tab, then checking the memory available.
+  </p>
+</details>
+
+
+### 4. Update our containers to use dynamic port mapping.
+
+As it is, our task launches containers on our host, and binds the container's
+`port 8080` to the host's `port 80`. This works really well, but has one very
+important problem: we can't bind more than multiple apps to a single port.
+
+This means that if we try to run more than one container in a single host,
+we'll hit an error, because 2 containers can't both be bound to the same
+host port `80`. 
+
+To remedy this, we can specify our task to run containers using **dynamic
+port mapping** --- Amazon ECS will run tasks, and then bind the specified
+container port to a (somewhat) random free port on the host. This way, containers
+don't try to race each other binding to a single host port.
+
+#### High-level instructions
+
+Update our task definition to have the container use dynamic port mapping, instead
+of being specifically bound to the host's port `80`.
+
+<details>
+  <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
+  <p>
+  
+  1. Go into your task definition again, and create a new revision of your
+     latest task definition revision.
+  2. In the task definition configuration screen, click on the container definition
+     in the task definition.
+  3. Modify the **Port Mappings** section so that the **Host port** is set to `0`
+     (instead of the old setting `80`). Click **Update**, then **Create** to 
+     finalize the new revision.
+  4. Update your service again, and point it to the newest revision for your
+     task definition. Notice that it will start up new tasks almost instantly.
+  </p>
+</details>
+
+Since there are no conflicts with how your new service update needs to run with
+how the old service is already running, Amazon ECS is able to run new containers
+using the new definition alongside the old ones. 
+
+After the new tasks are running in a stable manner, Amazon ECS will automatically
+stop the old tasks --- but not before draining their connections according to your
+configuration. Normally this just means that the new containers will not accept new
+connections, and will have a pre-defined window of time to finish all the existing
+processes it needs to finish (e.g. existing API calls). After this draining period,
+containers are then killed.
+
+If you then go to one of the tasks, you'll notice that their external URL is
+not anymore bound to port `:80`, but a seemingly random one.
+
+![ECS task dynamic port mapping](__assets/ecs_task_dynamic_port.png)
 
 ---
 
 ## Summary
 
-Congratulations! You've completed what is probably the most difficult part
-of this workshop. You've created a Docker image repository in
-[Amazon ECR](https://aws.amazon.com/ecr) and pushed a Docker image into it,
-created an [Amazon ECS](https://aws.amazon.com/ecs) cluster, and also
-created a task definition to run your Docker image. 
-Finally, you ran that task in your ECS cluster using a service.
+We've barely scratched the surface of what you can do to manage your container
+workloads, but we've discussed quite a bit --- enough for you to explore more 
+on your own.
 
-So, just a recap of the stuff you've created:
-
-- Docker images need to be pushed into a registry to be shared.
-  You created a registry using [Amazon ECR](https://aws.amazon.com/ecr).
-
-- Tasks definitions contain information on what containers need to be run together,
-  and the resources they require, among other things. 
-  In [Amazon ECS](https://aws.amazon.com/ecs), containers run inside tasks.
-
-- Clusters are a collection of hosts machines that can run your containers. 
-  When containers need to be run, the orchestrator decides which host in your
-  cluster to run your container in. 
-
-- Services run and maintain a number of tasks that your application requires.
-  The number of tasks required can be dictated manually (like we just did),
-  or determined automatically using other means (e.g. autoscaling).
-
-In the next module, we'll use the infrastructure you just built to explore
-a few more things that we can do with containers and 
-[Amazon ECS](https://aws.amazon.com/ecs).
+In the next module, we'll do a bit more exploring.
