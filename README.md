@@ -1,253 +1,170 @@
-Module 04: Load Balancing
+Module 05: Using AWS Fargate
 ===
 
-While it's very useful to be able to scale the number of containers in your
-cluster, that's only really useful if your containers are sending out requests
-themselves. When other entities need to talk to your containers 
-(e.g. if your containers are API endpoints, or the fronted web server of an app),
-it's not very convenient to have each container accessible only through their
-IP address. Furthermore, since containers are mortal, whenever one needs to be
-replaced, the IP address will also change as a result.
+Amazon ECS gives you very fine-grained control over how your containers are 
+run, as well as on the infrastructure that maintains all your container-based
+workloads. However, sometimes, you don't need that much control, or you just
+want to be able to run workloads much quicker, or you just want to be costed
+as closely to what you use as possible.
 
-To solve this problem, we normally place containers behind some form of a 
-[**load balancer**](https://en.wikipedia.org/wiki/Load_balancing_(computing)).
+This is where [AWS Fargate](https://aws.amazon.com/fargate) really shines.
+AWS Fargate functions very similarly to how we've used 
+[Amazon ECS](https://aws.amazon.com/ecs) in the following modules, with one
+very important distinction: in AWS Fargate, you don't manage any underlying
+infrastructure to run your containers.
 
-## Architecture Overview
+You essentially just tell AWS Fargate what containers / tasks / services to run,
+and how much resources they need, and it'll just silently handle the rest.
+There is no need to maintain a cluster of host EC2 instances.
 
-Amazon ECS supports launching containers behind load balancers.
-In this module, we'll use an **Application Load Balancer** to automatically
-route incoming connections to a fleet of containers running in an Amazon
-ECS service.
-
-![Architecture Diagram](__assets/architecture-04.png)
+Let's play around with it a bit.
 
 ---
 
 ## Implementation Details
 
-### 1. Create an Application Load Balancer
+### 1. Create an AWS Fargate cluster.
 
-An [Application Load Balancer](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html) (ALB) is a load balancer that operates at the application layer
-(or Layer 7 of the [OSI model](https://en.wikipedia.org/wiki/OSI_model)).
-
-ALBs operate in front of a collection of possible destinations (called targets).
-This collection is formally called a Target Group. Anything that is inside a 
-target group (that is considered healthy) is a valid target for an ALB to 
-delegate network traffic to.
+Creating one is very simple.
 
 #### High-level instructions
 
-Create an ALB from the Amazon EC2 dashboard, as well as the corresponding
-target group. Ensure that the target group is empty, and that the target group
-type is **instance**.
+Create an AWS Fargate cluster. Ensure that your cluster uses the same VPC that
+you've been using for the workshop.
 
 <details>
   <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
   <p>
   
-  1. Go to your [Amazon EC2](https://console.aws.amazon.com/ec2) dashboard.
-     From the left navbar, navigate to your **Target Groups**.
-  2. Create a new target group, then specify the following options:
-     - **Target group name**: _<< your choice >>_ (`nickname-ecs-tg` is good)
-     - **Target type**: Instance
-     - **Port**: `8080` 
-     - **VPC**: _Select the VPC you configured for this workshop._
-     - Under **Advanced health check settings**:
-       - **Healthy threshold**: `3`
-       - **Interval**: `6`
-  3. Click **Create**. Note that this target group does **not** have any targets yet.
-  4. After creating your target group, go to **Load Balancers** on the left navbar,
-     and create a new load balancer.
-  5. Opt for an **Application Load Balancer**.
-  6. In the next screen, plug in these values:
-     - **Name**: _<< your choice >>_ (`nickname-ecs-alb` is good)
-     - **VPC**: Make sure the VPC you prepared for this workshop is selected.
-       - Also, ensure you've checked all three availability zones.
-     - Click **Next**.
-  7. Ignore the warning on **Step 2** for now.
-  8. When prompted, choose to **Create a new security group**, and make sure to 
-     give it a proper name (`nickname-ecs-alb-sg` is great).
-
-     Note that there should already be a rule allowing `TCP` on port `80` from
-     a custom source `0.0.0.0/0, ::/0`. 
-
-     > **NOTE:**
-     > 
-     > `0.0.0.0/0, ::/0` essentially means "anywhere".
-
-     Click **Next**.
-  9. For **Target Group**, select the target group you just created. Click **Next**.
-  10. Ignore the step for registering targets. We want to keep this target group
-      empty for now. Click **Next**.
-  11. If you're satisfied with the configuration details in the review screen,
-      click **Create** to complete the creation of the ALB.
+  1. Go to your **Clusters** dashboard on [Amazon ECS](https://console.aws.amazon.com/ecs).
+     Create a new cluster.
+  2. When opted for a cluster template, choose **Networking only**.
+     Specifying this option launches a cluster under AWS Fargate.
+  3. In the next step, give your cluster a name. (`nickname-cluster-fargate` is great).
+  4. Do **not** opt to create a new VPC.
+  5. Click **Create** to finalize creation.
   </p>
 </details>
 
-Your ALB will take a moment to complete provisioning. That's OK --- since there
-are no targets behind it yet, it doesn't really do anything.
-
-Before we move on to the next step, however, make sure you copy the
-**DNS name** of the ALB you just created. This is the URL you can use to 
-communicate with the ALB (and consequently talk to the containers eventually
-behind it).
-
-![ALB details](__assets/alb_details.png)
+That's all. You should now have a fully functioning AWS Fargate cluster.
+Let's look at running some containers in it.
 
 
-### 2. Create a new task definition that uses our ALB
+### 2. Create a Fargate-compatible task definition.
 
-In Amazon ECS, the service definition specifies the networking requirements of
-the containers we're running --- including information on whether or not a
-load balancer should be used.
+Since AWS Fargate clusters don't run containers in EC2 instances you manage,
+the task definitions that are configured to run containers in EC2 
+(the ones we created in the last module) won't work with our new cluster.
 
-Once services are created, the load balancing configuration cannot be
-changed anymore, so we will need to create a service.
+We'll need to create a new task definition that is specifically for use 
+in AWS Fargate clusters. 
 
 #### High-level instructions
 
-Create a new Amazon ECS task definition with the same configuration as our 
-current one, but instead uses the ALB we just created.
+Create a new Fargate-compatible task definition, using the Docker image we pushed
+earlier to our [Amazon ECR](https://console.aws.amazon.com/ecr) registry.
 
 <details>
   <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
   <p>
   
-  1. Go to your Amazon ECS **Clusters** dashboard, and opt to create a new service.
-  2. Again, set the launch type to **EC2**, and select the latest revision
-     of our task definition. (This should now be revision 3, with the 
-     dynamic port mapping.)
-
-     Give the service a name (`nickname-ecs-app-alb` is good), then set the other
-     options as you did before. Specify a task number of 3.
-  3. On the **Configure Network** step, under **Load balancing**, opt to use
-     an **Application Load Balancer**. 
-
-     Set the **Service IAM role** to `Create new role`, and make sure you select
-     the ALB you created.
-  4. Under **Container to load balancer**, select your container (there should
-     only be one option here now --- it will look like `app:0:8080`), then
-     click **Add to load balancer**.
-
-     In the options list that appears, put in the following values:
-     - **Production listener port**: `80:HTTP`
-     - **Target group name**: _Select the target group you created_
-
-     The rest of the section should have been pre-filled with the values
-     you set when you created your ALB and target group.
-
-     Click **Next step**.
-  5. Ignore the step for **Auto Scaling** for now. Click **Next step**.
-  6. If you're satisfied with the settings, click **Create Service**.
+  1. Go to your **Task Definitions** dashboard, and create a new task definition.
+  2. Opt to use the **Fargate** launch type. Click **Next step**.
+  3. Enter the following values:
+     - **Task Definition Name**: _<< your choice >>_ (`nickname-app-fargate` is good)
+     - **Task Role**: None
+     - **Task Execution Role**: Create a new Role 
+     - **Task memory**: `0.5GB`
+     - **Task CPU**: `0.25 vCPU`
+     - Setup the rest of the options as you did the previous task definition.
+  4. Under **Container Definitions**, click **Add container**.
+  5. Set up the container definition as you did before, with one exception:
+     for **Port mappings** you only need to specify the container port.
+     (Remember that we set up our Docker image earlier to use `TCP 8080`.)
+  6. Click **Create** to complete creation.
   </p>
 </details>
 
-Again, your service will take a few moments to completely provision, but once it
-finishes (check your service's **Tasks** tab!) the tasks will have been launched 
-behind your ALB. Confirm that you can reach your containers by accessing the 
-ALB's DNS name using your browser.
-
-If you keep refreshing your browser, you should get different containers as you
-refresh. This shows you that the incoming network connections are being delegated
-to the different targets behind your load balancer.
+Excellent. Not a lot of differences, right?
+Let's create a service next.
 
 
-### 3. Clean up our old service
+### 3. Create a service in our AWS Fargate cluster
 
-We don't need our old service anymore. We now have an improved version of it
-behind a load balancer. Just makes sense we remove our old service so that
-we can save on costs, and free up valuable resources.
+By now it should be pretty apparent that there's really not a lot of changes
+to how you'd work with AWS Fargate than with how it is with Amazon ECS. 🤪
 
 #### High-level instructions
 
-Make the old service go 💥**BOOM**💥.
+Run a service in your AWS Fargate cluster containing only 1 task,
+using the task definition you just created.
 
 <details>
   <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
   <p>
   
-  1. Select your old service in your Amazon ECS cluster, and choose to update it.
-     Under **Number of tasks**, bring this down to `0`. Skip to review, and 
-     confirm the update.
-  2. Your service will now attempt to kill tasks to bring your task count to `0`.
-     Once there are no more tasks running under this service, you can go to your 
-     cluster's **Services** tab, and safely delete the service.
+  1. In your cluster's detail page, under the **Services** tab, opt to
+     create a new service.
+  2. Specify that the new service is for the **Fargate** launch type.
+     Select the task definition you just created, with the latest revision.
+     (There should only be one revision now.)
+  3. Fill in the inputs, specifying that you're only running **1 task** for now.
+  4. In the next step, select the VPC that you're using for this workshop.
+     Also select all 3 subnets you're using. 
+  5. For security group, click **Edit**.
+     Opt to create a new security group.
+     Give your security group a name. (`nickname-fargate-sg` is good)
+     **Ensure that your security group allows inbound network traffic to your container port.**
+     
+     Click **Save**.
+  6. Ensure **Auto-assign public IP** is `ENABLED`.
+  7. For **Load Balancing**, don't use a load balancer yet.
+  8. Click **Next Step**. 
+  9. Don't set **Auto Scaling** yet. Click **Next Step**.
+  10. If you're OK with the configuration, click **Create Service** to 
+      finalize your settings.
   </p>
 </details>
 
-Deleting a service in this way (by specifying for it to reduce its tasks to `0`),
-is a relatively safe way to decommission a service. The service is responsible
-for deleting the tasks under it, as well as other resources that the tasks may
-be using. 
+Like before, the service creation will run through its tasks, and will be 
+ready in a few moments.
 
+Go into the service detail page, and wait for the single task to become ready
+(status should be `RUNNING`).
 
-### 4. Improve our ECS cluster security grouping
+Like before, verify that you can reach the task by retrieving its external URL,
+and visiting it directly from your browser. (You will need to append the container
+port to the external URL!)
 
-Right now, our ECS cluster is not quite secure --- in the last module, we 
-opened up all our ECS instances to all TCP traffic from anywhere. This is 
-far from ideal.
+---
 
-The recommended architecture is to only allow the necessary traffic into your 
-instances.
+## Objectives ⭐️
 
-Considering this, we'll modify our ECS cluster to only allow incoming TCP
-traffic from our load balancer. This prevents anyone from directly accessing 
-our containers --- any traffic going into them (e.g. a browser), will need to
-go through the load balancer.
+Now that you've tried working with an AWS Fargate cluster, do the following
+objectives without us telling you how!
 
-#### High-level instructions
-
-Modify the security group of your ECS instances to only allow incoming `TCP`
-traffic across all ports from the security group assigned to your ALB.
-
-<details>
-  <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
-  <p>
-  
-  1. Go to your [Amazon EC2](https://console.aws.amazon.com/ec2) dashboard,
-     and navigate to your **Load Balancers**.
-  2. Select the ALB you created, and take note of the security group assigned
-     to it, located towards the bottom of its **Description** tab.
-  3. Back in your cluster dashboard, check the **ECS Instances** tab, and 
-     click one of the EC2 Instance IDs listed. 
-
-     ![ECS instances EC2 ID](__assets/ecs-cluster-ec2-id.png)
-  4. This will take you again to your EC2 dashboard, with that EC2 instance 
-     selected. Below in its **Description** tab, click on the **Security group**
-     assigned to it.
-     > **NOTE:**
-     >
-     > All the EC2 instances that make up your EC2 cluster will have the
-     > same security group, because they are launched under an auto-scaling
-     > group managed by Amazon ECS.
-     > 
-     > This means that changing this security group will affect all the EC2
-     > instances that are members of your Amazon ECS cluster.
-  5. In the screen you are sent to, select the **Inbound** tab at the bottom,
-     and click **Edit**.
-  6. Remove the rules currently assigned to this security group.
-     Add a new rule with the following values:
-     - **Type**: All TCP
-     - **Source**: Custom
-       - Type in the security group ID of your ALB (see step 2 above).
-     Click **Save** when you're satisfied.
-
-     ![Security Group setting for ALB](__assets/sg-allow-alb.png)
-  </p>
-</details>
-
-After you've modified the security group, confirm that you can still talk
-to your containers using the ALB DNS name.
-
-Afterwards, navigate to one of your task's detail page, and try to access it
-using its external URL --- confirm that you cannot anymore.
+1. Scale the service to `30 tasks` running at the same time.
+2. Modify the task definition so that the container uses:
+   - `1 GB` memory
+   - `0.5 vCPU`
+3. Create a new service that places tasks / containers behind an
+   Application Load Balancer.
+   (**Hint:** You will need to create a new Target Group, with type `IP`
+   instead of `Instance`.)
+4. Change the message your container makes from `Hello from {HOSTNAME}` to 
+   `{HOSTNAME} wishes you a good day!`. 
+   Make the necessary adjustments / deployments so that your services show
+   this change.
+5. Don't forget to scale back down to `1 task`.
 
 ---
 
 ## Summary
 
-In this module, we looked into some auxiliary things you can do to strengthen
-your cluster, and to make it a bit more functional.
+AWS Fargate allows you to run container-based workloads, all without having
+to do the heavy lifting associated with maintaining server / host 
+infrastructure. Just create a cluster, tell it how you want it to run your
+containers, and off you go.
 
-In the next modules, we'll switch gears up a bit, and use 
-[AWS Fargate](https://aws.amazon.com/fargate) instead of just Amazon ECS.
+In the next modules, let's look at how else we can work with Amazon ECS
+and AWS Fargate.
