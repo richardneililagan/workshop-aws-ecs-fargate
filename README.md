@@ -246,3 +246,8 @@ using its external URL --- confirm that you cannot anymore.
 
 ## Summary
 
+In this module, we looked into some auxiliary things you can do to strengthen
+your cluster, and to make it a bit more functional.
+
+In the next modules, we'll switch gears up a bit, and use 
+[AWS Fargate](https://aws.amazon.com/fargate) instead of just Amazon ECS.
