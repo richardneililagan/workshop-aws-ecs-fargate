@@ -1,170 +1,157 @@
-Module 05: Using AWS Fargate
+Module 06: Auto-scaling Tasks
 ===
 
-Amazon ECS gives you very fine-grained control over how your containers are 
-run, as well as on the infrastructure that maintains all your container-based
-workloads. However, sometimes, you don't need that much control, or you just
-want to be able to run workloads much quicker, or you just want to be costed
-as closely to what you use as possible.
+One of the biggest advantages of using containers is that
+you're able to start containers very rapidly. This allows you
+to do some very creative things not normally possible with
+on-premise deployments, or sometimes even with traditional cloud.
 
-This is where [AWS Fargate](https://aws.amazon.com/fargate) really shines.
-AWS Fargate functions very similarly to how we've used 
-[Amazon ECS](https://aws.amazon.com/ecs) in the following modules, with one
-very important distinction: in AWS Fargate, you don't manage any underlying
-infrastructure to run your containers.
+In this module, we'll look into automatically scaling our
+Fargate service, so that as more users use our service, more 
+containers are automatically created to handle the increased load.
 
-You essentially just tell AWS Fargate what containers / tasks / services to run,
-and how much resources they need, and it'll just silently handle the rest.
-There is no need to maintain a cluster of host EC2 instances.
-
-Let's play around with it a bit.
+> **IMPORTANT:**
+>
+> To properly do auto-scaling, you should have successfully done
+> the creation of a Fargate-enabled load balancer setup from the previous
+> module's objectives.
 
 ---
 
 ## Implementation Details
 
-### 1. Create an AWS Fargate cluster.
+### 1. Add a heavy computation to your Docker image.
 
-Creating one is very simple.
-
-#### High-level instructions
-
-Create an AWS Fargate cluster. Ensure that your cluster uses the same VPC that
-you've been using for the workshop.
+Let's artificially introduce a heavy computation in our application.
 
 <details>
-  <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
-  <p>
-  
-  1. Go to your **Clusters** dashboard on [Amazon ECS](https://console.aws.amazon.com/ecs).
-     Create a new cluster.
-  2. When opted for a cluster template, choose **Networking only**.
-     Specifying this option launches a cluster under AWS Fargate.
-  3. In the next step, give your cluster a name. (`nickname-cluster-fargate` is great).
-  4. Do **not** opt to create a new VPC.
-  5. Click **Create** to finalize creation.
-  </p>
+   <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
+   <p>
+   
+   1. Back in the source code for your app, let's install a few additional
+      dependencies:
+
+      ```
+      npm install --save --save-exact threads
+      ```
+   2. Change the source code of your app to introduce a new endpoint:
+      ```javascript
+      const { spawn } = require('threads')
+      const express = require('express')
+      const app = express()
+
+      const HOSTNAME = process.env.HOSTNAME || 'unnamed'
+      const PORT = process.env.PORT || 8080
+
+      // :: ---
+
+      app.get('/', (request, response) => {
+      response.send(`Hello from ${HOSTNAME}!`)
+      })
+
+      // :: ---
+
+      const computation = () => {
+      const thread = spawn((input, done) => {
+         const limit = 5e4
+         let lasthash = ''
+
+         for (let i = 0; i < limit; i++) {
+            lasthash = require('crypto')
+            .createHash('md5')
+            .update(lasthash + new Date())
+            .digest('hex')
+         }
+
+         done(lasthash)
+      })
+
+      return new Promise((resolve, reject) => {
+         thread.on('message', (response) => {
+            resolve(response)
+            thread.kill()
+         })
+
+         thread.on('exit', () => console.log('Worker terminated.'))
+         thread.send()
+      })
+      }
+
+      app.get('/computation', async (request, response) => {
+      const result = await computation()
+      response.send(result)
+      })
+
+      app.listen(PORT, () => console.log(`Example app running on port ${PORT}.`))
+      ```
+   3. Build your image again.
+      ```
+      docker build -t <your-namespace>/<your-image-name> .
+      ```
+   4. Confirm that the endpoint works by running the image on your local
+      and visiting `localhost:8080/computation`.
+      ```
+      docker run -it --rm -p 8080:8080 <your-namespace>/<your-image-name>
+      ```
+   5. Follow the instructions in [Amazon ECR](https://console.aws.amazon.com/ecr)
+      to push your new image back up to your repository.
+   6. Update your Fargate service and task definition to use your new image.
+   </p>
 </details>
 
-That's all. You should now have a fully functioning AWS Fargate cluster.
-Let's look at running some containers in it.
-
-
-### 2. Create a Fargate-compatible task definition.
-
-Since AWS Fargate clusters don't run containers in EC2 instances you manage,
-the task definitions that are configured to run containers in EC2 
-(the ones we created in the last module) won't work with our new cluster.
-
-We'll need to create a new task definition that is specifically for use 
-in AWS Fargate clusters. 
-
-#### High-level instructions
-
-Create a new Fargate-compatible task definition, using the Docker image we pushed
-earlier to our [Amazon ECR](https://console.aws.amazon.com/ecr) registry.
+### 2. Add an auto-scaling policy to your service.
 
 <details>
-  <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
-  <p>
-  
-  1. Go to your **Task Definitions** dashboard, and create a new task definition.
-  2. Opt to use the **Fargate** launch type. Click **Next step**.
-  3. Enter the following values:
-     - **Task Definition Name**: _<< your choice >>_ (`nickname-app-fargate` is good)
-     - **Task Role**: None
-     - **Task Execution Role**: Create a new Role 
-     - **Task memory**: `0.5GB`
-     - **Task CPU**: `0.25 vCPU`
-     - Setup the rest of the options as you did the previous task definition.
-  4. Under **Container Definitions**, click **Add container**.
-  5. Set up the container definition as you did before, with one exception:
-     for **Port mappings** you only need to specify the container port.
-     (Remember that we set up our Docker image earlier to use `TCP 8080`.)
-  6. Click **Create** to complete creation.
-  </p>
+   <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
+   <p>
+   
+   1. Navigate to your Fargate service's detail page, and click **Update**.
+   2. Skip over to **Step 3** to start configuring auto-scaling.
+   3. Opt to **Configure Service Auto Scaling**, and put in the following:
+      - **Minimum number of tasks**: 2
+      - **Maximum number of tasks**: 20
+      - **IAM Role**: Create new Role
+   4. Click **Add Scaling Policy**, and input the following values:
+      - **Scaling policy type**: Target tracking
+      - **Policy name**: _<< your choice >>_ (`nickname-fargate-service-asp` is good)
+      - **ECS Service Metric**: `ECSServiceAverageCPUUtilization`
+      - **Target value**: `50`
+      - **Scale-out cooldown period**: `30`
+      - **Scale-in cooldown period**: `30`
+      - Click **Next**.
+   5. Confirm your changes then click **Update**.
+   </p>
 </details>
 
-Excellent. Not a lot of differences, right?
-Let's create a service next.
+After updating your service, confirm that you can still visit your service
+through your ALB.
 
 
-### 3. Create a service in our AWS Fargate cluster
+### 3. Bombard your service and wait for it to scale.
 
-By now it should be pretty apparent that there's really not a lot of changes
-to how you'd work with AWS Fargate than with how it is with Amazon ECS. 🤪
-
-#### High-level instructions
-
-Run a service in your AWS Fargate cluster containing only 1 task,
-using the task definition you just created.
+If you have a preference on a load testing tool, use that.
+Otherwise, [Blazemeter](https://blazemeter.com) has a free tier you can use.
 
 <details>
-  <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
-  <p>
-  
-  1. In your cluster's detail page, under the **Services** tab, opt to
-     create a new service.
-  2. Specify that the new service is for the **Fargate** launch type.
-     Select the task definition you just created, with the latest revision.
-     (There should only be one revision now.)
-  3. Fill in the inputs, specifying that you're only running **1 task** for now.
-  4. In the next step, select the VPC that you're using for this workshop.
-     Also select all 3 subnets you're using. 
-  5. For security group, click **Edit**.
-     Opt to create a new security group.
-     Give your security group a name. (`nickname-fargate-sg` is good)
-     **Ensure that your security group allows inbound network traffic to your container port.**
-     
-     Click **Save**.
-  6. Ensure **Auto-assign public IP** is `ENABLED`.
-  7. For **Load Balancing**, don't use a load balancer yet.
-  8. Click **Next Step**. 
-  9. Don't set **Auto Scaling** yet. Click **Next Step**.
-  10. If you're OK with the configuration, click **Create Service** to 
-      finalize your settings.
-  </p>
+   <summary><strong>Step-by-step instructions (click to expand):</strong></summary>
+   <p>
+   
+   1. Set up your load test so that you are sending requests to your
+      `/computation` path, through your ALB.
+      (e.g. `https://my-load-balancer.amazon.com/computation`)
+   2. Send as many requests over as many users as you want.
+      If you're using Blazemeter, set it up so that you're sending requests
+      from **50 users** over **20 minutes** with **5 minute ramp up time**.
+   3. Look at the pretty graphs.
+   4. Check out the events happening in your Fargate service. 
+      Eventually your service is going to start getting congested, and the
+      ECS service will orchestrate a scaling, and add more tasks automatically.
+   </p>
 </details>
 
-Like before, the service creation will run through its tasks, and will be 
-ready in a few moments.
+If configured correctly, your Fargate service should have automatically
+scaled the number of tasks in your service to address the increasing demand.
 
-Go into the service detail page, and wait for the single task to become ready
-(status should be `RUNNING`).
+This should be visible in the graph.
 
-Like before, verify that you can reach the task by retrieving its external URL,
-and visiting it directly from your browser. (You will need to append the container
-port to the external URL!)
-
----
-
-## Objectives ⭐️
-
-Now that you've tried working with an AWS Fargate cluster, do the following
-objectives without us telling you how!
-
-1. Scale the service to `30 tasks` running at the same time.
-2. Modify the task definition so that the container uses:
-   - `1 GB` memory
-   - `0.5 vCPU`
-3. Create a new service that places tasks / containers behind an
-   Application Load Balancer.
-   (**Hint:** You will need to create a new Target Group, with type `IP`
-   instead of `Instance`.)
-4. Change the message your container makes from `Hello from {HOSTNAME}` to 
-   `{HOSTNAME} wishes you a good day!`. 
-   Make the necessary adjustments / deployments so that your services show
-   this change.
-5. Don't forget to scale back down to `1 task`.
-
----
-
-## Summary
-
-AWS Fargate allows you to run container-based workloads, all without having
-to do the heavy lifting associated with maintaining server / host 
-infrastructure. Just create a cluster, tell it how you want it to run your
-containers, and off you go.
-
-In the next modules, let's look at how else we can work with Amazon ECS
-and AWS Fargate.
+![Load testing results](__assets/load-testing.png)
